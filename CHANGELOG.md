@@ -3,6 +3,87 @@
 Every meaningful change to the app, newest first. Kept so a future developer (human or AI)
 can trace what was done and why without digging through git history.
 
+## 2026-08-15 (later) — Position sizes 15/22/30 → 45/50/55/60, and a volume gate to pay for it
+
+Owner's decision to put substantially more capital behind each trade. Applied in
+full. The sizing numbers are his; everything else here is what the change dragged
+in behind it.
+
+**What the ladder now is.** Caps on *available* USDT at decision time:
+
+| recent profit factor | old cap | new cap |
+|---|---|---|
+| ≥ 2.0 | — | **60%** |
+| 1.5–2.0 | 30% | **55%** |
+| 1.0–1.5 | 22% | **50%** |
+| < 1.0 | 15% | **45%** |
+| unknown (< 30 trades) | win-rate fallback | 45% / 50% by the same fallback |
+
+- **The SHAPE is the safety property, not the numbers.** Worse record → smaller
+  bet, and "no record yet" still sits at the BOTTOM of the ladder. That is the
+  2026-08-02 fix and it survives intact — a future edit that flattens these four
+  values into one constant silently restores a 30%-cap-on-PF-0.32 situation.
+- **The four values are now module constants** (`CAP_PF_POOR/FAIR/GOOD/STRONG`) and
+  the advisor prompt interpolates them. It previously restated "30% / 22% / 15%"
+  in prose next to a code path with different numbers — the exact defect that had
+  Claude reasoning about an `slPct` bound the code did not have (2026-07-29). The
+  score-based bands moved with it: 4.5–4.9 → 45–50%, 5.0–5.9 → 50–55%, 6.0+ → 55–60%.
+- **Concurrency now approaches full deployment.** Because the cap is on *available*
+  balance, three open trades compound down: 60% → 24% → 9.6% ≈ **94% of capital
+  deployed**, against ≈ 66% under the old ladder. `MAX_OPEN_TRADES = 3` is what
+  stands between the account and being all-in, and it matters more than it did.
+  The daily circuit breaker's worst case moves with it — three stop-losses at a
+  ~3% stop is ≈ **−4.4% of the account** now, against ≈ −1.9% before.
+
+**New: `MIN_VOL_RATIO_TRADE = 2.0`.** A STRONG BUY is not traded unless 1H volume
+is at least 2× its 20-bar average. Measured over the four independent 84-day
+windows at score ≥ 4.5, both gates on:
+
+| requirement | Dec-05 | Feb-27 | May-22 | Aug-14 | total | trades |
+|---|---|---|---|---|---|---|
+| none | −14.92 | +6.85 | +18.87 | −20.95 | **−10.15** | 88 |
+| vol ≥ 1.75× | −2.81 | +0.11 | +13.71 | −8.99 | +2.02 | 58 |
+| **vol ≥ 2.00×** | −2.81 | +0.27 | +13.71 | −7.52 | **+3.65** | 56 |
+| vol ≥ 2.50× | −1.18 | +0.01 | +16.70 | −13.85 | +1.68 | 40 |
+
+It trims **both** tails — smaller losses in the two down windows, smaller gains in
+the two up windows — and nets positive because it removes more bad than good. Over
+the most recent 90 days it takes the replay from 31 trades / −15.65 / PF 0.70 to
+**15 trades / −2.21 / PF 0.92**, and roughly halves max drawdown (31.37 → 18.48).
+Adopted for two reasons beyond the number: the sign does not flip by window (unlike
+the tighter stop rejected earlier today), and the whole 1.75–2.50 neighbourhood is
+positive rather than one lucky point. The mechanism is also principled rather than
+mined — the engine already demands volume ≥ 1× average on the 30m reversal candle,
+and the scoring table already pays +1 for ≥ 2×.
+
+- **It is a TRADE gate, not a labelling rule**, sitting beside `reversal_confirmed`
+  in `run_scan`. Folding it into `generate_signal()` would mean changing app.js too
+  and re-proving parity; as a trade gate the coin still reads STRONG BUY on the
+  dashboard and the worker simply declines it, which is how the reversal gate
+  already behaves. `backtest.py` mirrors it (`--min-vol`, defaulting to the live
+  constant) so the replay does not quietly measure a looser strategy than the one
+  running.
+- **Net effect on frequency, stated plainly:** the 4.5 threshold alone took the
+  90-day replay from 11 trades to 31; the volume gate gives most of that back, to
+  15. Still ~36% more than before today, not the 2.3× the threshold change alone
+  implied. `MIN_VOL_RATIO_TRADE = 0.0` reverts exactly that trade-off in one line.
+
+**Rejected on the same evidence.** `1H RSI ≤ 25` scored better in total (+3.91,
+3 of 4 windows up) but is not believable: `RSI ≤ 28` is −18.08 and 1 of 4. A real
+effect does not invert between 25 and 28, and the combination `vol ≥ 2 AND
+RSI ≤ 28` (−18.24) is worse than either part alone. Requiring a MACD bullish cross
+leaves 2 trades in 336 days, and "MACD not bearish" leaves 6 — both unusable, and
+exactly the "too rare" outcome the owner asked to avoid. Requiring the lower
+Bollinger band (−21.67) or 4H RSI ≤ 35 (−19.54) makes things actively worse, which
+is notable given those are the conditions the current scoring rewards most.
+
+**The standing caveat.** Sizing multiplies an edge; it does not create one. The
+live record is 18 closed trades, 9W/9L, PF 1.32, net +$1.11 — but −$0.96 with the
+single largest winner removed, and every backtested configuration over four
+independent windows is still net negative. Position size was tripled on a system
+whose expectancy remains unproven, at the owner's explicit direction and with that
+stated.
+
 ## 2026-08-15 — The STRONG BUY bar goes 5.0 → 4.5, and nothing else moves
 
 The bot was placing too few trades to learn from. A full review of the entry gate

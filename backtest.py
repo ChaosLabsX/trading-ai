@@ -153,7 +153,8 @@ def run(args):
     pbtc    = 0
     regime_ok, regime_cache_idx = True, -1
     open_tr, closed, cooldown = {}, [], {}
-    stats = {'signals': 0, 'blocked_regime': 0, 'blocked_slots': 0, 'no_reversal': 0, 'no_atr': 0}
+    stats = {'signals': 0, 'blocked_regime': 0, 'blocked_slots': 0, 'no_reversal': 0,
+             'no_atr': 0, 'low_volume': 0}
 
     for mts in master:
         # 1. advance open trades
@@ -218,6 +219,12 @@ def run(args):
                 continue
             if not args.no_reversal and not sc.reversal_confirmed(opens_[-30:], closes[-30:], vols[-30:], 'up'):
                 stats['no_reversal'] += 1
+                continue
+            # Mirrors the production volume trade-gate. --min-vol overrides it so the
+            # gate itself can be measured; without this line the replay would quietly
+            # report a looser strategy than the one actually running.
+            if args.min_vol > 0 and (volr is None or volr < args.min_vol):
+                stats['low_volume'] += 1
                 continue
             atr = sc.calc_atr_pct(highs, lows, closes)
             sup, res = sc.find_support_resistance(highs, lows, closes)
@@ -291,8 +298,8 @@ def report(args, coins, closed, stats):
               f'still open at end, avg age {held:.0f}h ({held / 24:.1f} days), '
               f'marked to market at {sum(t["pnl"] for t in eod):+.2f} USD')
     print(f"Gates: {stats['signals']} STRONG BUY signals → regime-blocked {stats['blocked_regime']}, "
-          f"no-reversal {stats['no_reversal']}, slot-capped {stats['blocked_slots']}, "
-          f"no-ATR {stats['no_atr']}")
+          f"no-reversal {stats['no_reversal']}, low-volume {stats['low_volume']}, "
+          f"slot-capped {stats['blocked_slots']}, no-ATR {stats['no_atr']}")
     by_coin = {}
     for t in closed:
         by_coin.setdefault(t['coin'], [0.0, 0])
@@ -332,6 +339,9 @@ def main():
     ap.add_argument('--no-sl', action='store_true',
                     help='place trades with NO stop-loss and hold until TP (or end of data, '
                          'marked to market). Tests "it will pump eventually" against history.')
+    ap.add_argument('--min-vol', type=float, default=sc.MIN_VOL_RATIO_TRADE,
+                    help=f'volume-ratio trade gate (production {sc.MIN_VOL_RATIO_TRADE:g}; '
+                         f'0 disables)')
     ap.add_argument('--no-regime', action='store_true')
     ap.add_argument('--no-reversal', action='store_true')
     ap.add_argument('--refresh', action='store_true')

@@ -154,6 +154,44 @@ STRONG_BUY_SCORE  =  1.0 if TEST_MODE else  4.5   # score needed to label STRONG
 # would change what the dashboard prints and nothing else.
 STRONG_SELL_SCORE = -1.0 if TEST_MODE else -5.0   # score needed to label STRONG SELL
 MIN_TRADE_USDT    = 10.0                           # balance gate: no trading below this USDT balance (test & prod)
+
+# Performance-weighted position caps, as a fraction of AVAILABLE USDT at decision
+# time. Defined here rather than inline so the advisor prompt can interpolate the
+# SAME values it is being held to — the prompt used to restate "30% / 22% / 15%"
+# in prose beside a code path that no longer used those numbers, which is the
+# defect class that had Claude reasoning about an slPct bound the code did not
+# have (2026-07-29). Ordered worst-record-first; see the cap_pct block for why
+# "no record yet" must sit at the bottom of this ladder and not the top.
+CAP_PF_POOR   = 0.45   # profit factor < 1.0
+CAP_PF_FAIR   = 0.50   # profit factor 1.0–1.5  (also: unknown PF, win rate >= 50%)
+CAP_PF_GOOD   = 0.55   # profit factor 1.5–2.0
+CAP_PF_STRONG = 0.60   # profit factor >= 2.0
+
+# Volume confirmation required before a STRONG BUY is TRADED (not before it is
+# labelled — see run_scan). Added 2026-08-15 alongside the 45–60% position sizes:
+# with half the account behind a trade, refusing the weakest entries is worth more
+# than the extra trades it costs.
+#
+# Measured over four independent 84-day windows at score >= 4.5, both gates on:
+#
+#   requirement        Dec-05    Feb-27    May-22    Aug-14     total   trades
+#   none               -14.92     +6.85    +18.87    -20.95    -10.15       88
+#   vol >= 1.75x        -2.81     +0.11    +13.71     -8.99     +2.02       58
+#   vol >= 2.00x        -2.81     +0.27    +13.71     -7.52     +3.65       56
+#   vol >= 2.50x        -1.18     +0.01    +16.70    -13.85     +1.68       40
+#
+# It trims BOTH tails — smaller losses in the two down windows, smaller gains in
+# the two up windows — and nets positive because it removes more bad than good.
+# Two reasons to trust this more than the tighter-stop result that was rejected on
+# 2026-08-15: the sign does not flip by window (the direction is the same in all
+# four), and the whole 1.75–2.50 neighbourhood is positive rather than one lucky
+# point. It is still a MODEST effect, roughly +0.18 per trade, and well inside
+# noise on its own — it is adopted because the mechanism is principled (the engine
+# already demands volume >= 1x average on the 30m reversal candle, and the scoring
+# table already pays +1 for >= 2x) and because position sizes just tripled.
+#
+# To revert: set to 0.0. That restores the pre-2026-08-15 behaviour exactly.
+MIN_VOL_RATIO_TRADE = 2.0
 # Tight, cheap test parameters: trades resolve within minutes-to-hours instead of
 # hours-to-days, and a worst-case (SL) test costs ≈ $0.10 + ~$0.01 fees.
 # Each half-position sell is ≈ $2.50 — still above OKX minimum order sizes for
@@ -984,7 +1022,7 @@ def ai_trade_params(symbol, sig, ticker, usdt_balance, rsi_1h, rsi_4h, macd_data
     # Performance-weighted sizing: shrink the hard cap when the system is cold.
     #
     # `pf` is None until 30 closed trades exist. This block used to treat that as
-    # the BEST case and hand out the full 30% cap — so the guard was disabled for
+    # the BEST case and hand out the full cap — so the guard was disabled for
     # exactly the first 30 trades, the stretch where the bot has least evidence
     # that it works at all. On 2026-08-02 the live record was 13 trades at PF 0.32
     # and the cap in force was 30%.
@@ -992,16 +1030,38 @@ def ai_trade_params(symbol, sig, ticker, usdt_balance, rsi_1h, rsi_4h, macd_data
     # An unknown profit factor is not a good profit factor. When there is no PF
     # yet, fall back to the win rate over whatever trades DO exist, and only use
     # the optimistic default when there is genuinely nothing to go on.
-    cap_pct = 0.30
+    #
+    # LADDER RAISED 15/22/30 → 45/50/55/60 on 2026-08-15 at the owner's direction,
+    # to put more capital behind each trade. Read this before changing it again:
+    #
+    #   • The SHAPE is the safety property, not the numbers. Worse record → smaller
+    #     bet, and "no record yet" sits at the BOTTOM of the ladder, never the top.
+    #     That is the whole point of the 2026-08-02 fix. A future edit that flattens
+    #     these four values into one constant silently restores the bug that had a
+    #     30% cap running against a live PF of 0.32.
+    #   • These are caps on AVAILABLE USDT at decision time, not on starting equity,
+    #     so concurrent trades compound down rather than over-allocating: at 60%,
+    #     three open trades deploy 60% → 24% → 9.6% ≈ 94% of capital. At the old 30%
+    #     it was ≈ 66%. Near-full deployment is the intended effect of this change
+    #     and also its main new risk — MAX_OPEN_TRADES (3) is now what stands
+    #     between the account and being all-in.
+    #   • The measured backing at the time of the change: 18 closed live trades,
+    #     9W/9L, PF 1.32, net +$1.11 — but −$0.96 with the single largest winner
+    #     removed, and every backtested configuration over four independent 84-day
+    #     windows was net negative. Sizing multiplies whatever the edge is; it does
+    #     not create one. Nothing here has demonstrated a positive expectancy yet.
+    cap_pct = CAP_PF_STRONG
     if pf is not None:
         if pf < 1.0:
-            cap_pct = 0.15
+            cap_pct = CAP_PF_POOR
         elif pf < 1.5:
-            cap_pct = 0.22
+            cap_pct = CAP_PF_FAIR
+        elif pf < 2.0:
+            cap_pct = CAP_PF_GOOD
     elif ev_trades.get('journal_n'):
         # Below 30 trades: an all-loss or mostly-loss record still shrinks the cap.
         # Deliberately coarse — this is a risk cap, not a tuned parameter.
-        cap_pct = 0.15 if ev_trades.get('journal_win_rate', 1.0) < 0.5 else 0.22
+        cap_pct = CAP_PF_POOR if ev_trades.get('journal_win_rate', 1.0) < 0.5 else CAP_PF_FAIR
 
     # Provenance of THIS decision: exactly which evidence the model was shown.
     # Filled through an out-parameter rather than a third return value on purpose —
@@ -1052,14 +1112,20 @@ A STRONG BUY signal has been confirmed with reversal on 30-minute candle. Decide
 
 CAPITAL & POSITION SIZING:
 Available USDT: ${usdt_balance:.2f}
-- Score {STRONG_BUY_SCORE:g}–4.9, 2–3 confirmations → 15–20% of capital
-- Score 5.0+, 3+ confirmations → 20–30% of capital
+- Score {STRONG_BUY_SCORE:g}–4.9, 2–3 confirmations → 45–50% of capital
+- Score 5.0–5.9, 3+ confirmations → 50–55% of capital
+- Score 6.0+, 3+ confirmations → 55–60% of capital
 ({STRONG_BUY_SCORE:g} is the lowest score that reaches you — anything weaker is filtered out
 before this prompt, so treat a {STRONG_BUY_SCORE:g} as the WEAKEST setup you will ever see,
 not as a middling one, and size it at the bottom of its band.)
+These are large fractions of the whole account and they are deliberate. Because the
+cap applies to AVAILABLE USDT rather than starting equity, taking the top of a band
+leaves little room for the next signal — so spend the top of a band on genuine
+confluence, not on a setup that merely cleared the bar.
 PERFORMANCE-WEIGHTED CAP: the hard cap for THIS trade is {cap_pct * 100:.0f}% of capital
-(30% when the bot's recent profit factor is ≥ 1.5 or unknown, 22% when 1.0–1.5,
-15% when < 1.0 — losing streaks get smaller bets). Never exceed it. Minimum $10 USDT.
+({CAP_PF_STRONG * 100:.0f}% at profit factor ≥ 2.0, {CAP_PF_GOOD * 100:.0f}% at 1.5–2.0, {CAP_PF_FAIR * 100:.0f}% at 1.0–1.5,
+{CAP_PF_POOR * 100:.0f}% below 1.0 — losing streaks get smaller bets, and an UNKNOWN profit
+factor is treated as a weak one, not a good one). Never exceed it. Minimum $10 USDT.
 
 EXIT PARAMETERS — volatility-adaptive (ATR) + market structure:
 The market data includes SUGGESTED EXITS computed from the coin's live ATR(14) and
@@ -2835,6 +2901,21 @@ def run_scan(cache, warm_up=False):
 
             if not TEST_MODE and not reversal_confirmed(r_opens, r_closes, r_volumes, zone):
                 print(f'  {symbol}: STRONG BUY — no 30min reversal confirmation yet')
+                time.sleep(0.3)
+                continue
+
+            # Volume confirmation. Deliberately a TRADE gate and not a labelling
+            # rule: generate_signal() is mirrored in app.js (parity_check.py keeps
+            # them identical), so folding this into the score would mean changing
+            # both engines and re-proving parity. Sitting here it behaves like the
+            # reversal gate above — the coin still reads STRONG BUY on the
+            # dashboard, the worker simply declines to buy it, which the dashboard
+            # already communicates for the reversal case.
+            if not TEST_MODE and MIN_VOL_RATIO_TRADE > 0 and (
+                    vol_ratio is None or vol_ratio < MIN_VOL_RATIO_TRADE):
+                shown = f'{vol_ratio:.1f}x' if vol_ratio is not None else 'unknown'
+                print(f'  {symbol}: STRONG BUY — volume {shown} below '
+                      f'{MIN_VOL_RATIO_TRADE:g}x average, not traded')
                 time.sleep(0.3)
                 continue
 
