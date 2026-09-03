@@ -168,7 +168,7 @@ CAP_PF_GOOD   = 0.55   # profit factor 1.5–2.0
 CAP_PF_STRONG = 0.60   # profit factor >= 2.0
 
 # Volume confirmation required before a STRONG BUY is TRADED (not before it is
-# labelled — see run_scan). Added 2026-08-15 alongside the 45–60% position sizes:
+# labelled — see run_scan). Added 2026-09-03 alongside the 45–60% position sizes:
 # with half the account behind a trade, refusing the weakest entries is worth more
 # than the extra trades it costs.
 #
@@ -185,7 +185,8 @@ CAP_PF_STRONG = 0.60   # profit factor >= 2.0
 # Two reasons to trust this more than the tighter-stop result that was rejected on
 # 2026-08-15: the sign does not flip by window (the direction is the same in all
 # four), and the whole 1.75–2.50 neighbourhood is positive rather than one lucky
-# point. It is still a MODEST effect, roughly +0.18 per trade, and well inside
+# point. Note the candle cache behind those windows ends 2026-08-14, so they do not
+# cover the three weeks before this gate shipped. It is still a MODEST effect, roughly +0.18 per trade, and well inside
 # noise on its own — it is adopted because the mechanism is principled (the engine
 # already demands volume >= 1x average on the 30m reversal candle, and the scoring
 # table already pays +1 for >= 2x) and because position sizes just tripled.
@@ -1031,7 +1032,7 @@ def ai_trade_params(symbol, sig, ticker, usdt_balance, rsi_1h, rsi_4h, macd_data
     # yet, fall back to the win rate over whatever trades DO exist, and only use
     # the optimistic default when there is genuinely nothing to go on.
     #
-    # LADDER RAISED 15/22/30 → 45/50/55/60 on 2026-08-15 at the owner's direction,
+    # LADDER RAISED 15/22/30 → 45/50/55/60 on 2026-09-03 at the owner's direction,
     # to put more capital behind each trade. Read this before changing it again:
     #
     #   • The SHAPE is the safety property, not the numbers. Worse record → smaller
@@ -1045,11 +1046,12 @@ def ai_trade_params(symbol, sig, ticker, usdt_balance, rsi_1h, rsi_4h, macd_data
     #     it was ≈ 66%. Near-full deployment is the intended effect of this change
     #     and also its main new risk — MAX_OPEN_TRADES (3) is now what stands
     #     between the account and being all-in.
-    #   • The measured backing at the time of the change: 18 closed live trades,
-    #     9W/9L, PF 1.32, net +$1.11 — but −$0.96 with the single largest winner
-    #     removed, and every backtested configuration over four independent 84-day
-    #     windows was net negative. Sizing multiplies whatever the edge is; it does
-    #     not create one. Nothing here has demonstrated a positive expectancy yet.
+    #   • The measured backing at the time of the change: 24 closed live trades,
+    #     14W/10L, 58% win rate, net +$7.89, PF 2.72, and +$5.17 with the single
+    #     largest winner removed. Encouraging — but below the 30 trades this very
+    #     guard requires before it will trust a profit factor, and every backtested
+    #     configuration over four independent 84-day windows was still net negative.
+    #     Sizing multiplies whatever the edge is; it does not create one.
     cap_pct = CAP_PF_STRONG
     if pf is not None:
         if pf < 1.0:

@@ -3,7 +3,7 @@
 Every meaningful change to the app, newest first. Kept so a future developer (human or AI)
 can trace what was done and why without digging through git history.
 
-## 2026-08-15 (later) — Position sizes 15/22/30 → 45/50/55/60, and a volume gate to pay for it
+## 2026-09-03 — Position sizes 15/22/30 → 45/50/55/60, and a volume gate to pay for it
 
 Owner's decision to put substantially more capital behind each trade. Applied in
 full. The sizing numbers are his; everything else here is what the change dragged
@@ -77,12 +77,23 @@ exactly the "too rare" outcome the owner asked to avoid. Requiring the lower
 Bollinger band (−21.67) or 4H RSI ≤ 35 (−19.54) makes things actively worse, which
 is notable given those are the conditions the current scoring rewards most.
 
-**The standing caveat.** Sizing multiplies an edge; it does not create one. The
-live record is 18 closed trades, 9W/9L, PF 1.32, net +$1.11 — but −$0.96 with the
-single largest winner removed, and every backtested configuration over four
-independent windows is still net negative. Position size was tripled on a system
-whose expectancy remains unproven, at the owner's explicit direction and with that
-stated.
+**The standing caveat, with current numbers.** Sizing multiplies an edge; it does
+not create one. The live record as of this change is **24 closed trades, 14W/10L,
+58% win rate, net +$7.89, PF 2.72** — and, unlike a month ago, **+$5.17 with the
+single largest winner removed**, so it no longer rests on one trade. Average win
++2.57% against average loss −3.02% (R:R 0.85, break-even 54%) — the payoff geometry
+is still upside-down, the win rate is simply carrying it at the moment.
+
+Two reasons to keep the caveat anyway: 24 trades is below the 30 the profit-factor
+guard itself requires before it trusts a PF, and every backtested configuration over
+the four independent windows is still net negative. Position size was roughly
+tripled at the owner's explicit direction on a record that is encouraging but not
+yet established.
+
+**Data cutoff.** The candle cache backing every window in this entry ends
+**2026-08-14**, so the measurements exclude the ~3 weeks before this change — a
+stretch in which the bot went 5W/1L live. The backtested figures are therefore
+neither confirmed nor contradicted by the most recent live results.
 
 ## 2026-08-15 — The STRONG BUY bar goes 5.0 → 4.5, and nothing else moves
 
