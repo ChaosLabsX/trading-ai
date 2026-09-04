@@ -95,6 +95,7 @@ There is also `TEST_FORCE_SIGNAL` (normally `False`): forces a fake BTC STRONG B
 | Auto-trading paused | circuit breaker | 3 stop-losses in 24 h — new trades resume automatically; sent at most once per day |
 | **Daily Report** (heartbeat) | `maybe_send_daily_digest()` | Once per UTC day (first run after 08:00 UTC), deliberately minimal — two lines: `💓 Daily Report — OKX Trading` + `📈 Open trades: N (COIN, COIN…)`. **Dead-man switch: if this message stops arriving, the pipeline is down** — on the VPS, check `Get-ScheduledTask -TaskName "OKX-SignalChecker"` and the tail of `C:\OKXAI\logs\okx-signal-checker.log`. Dedup state in the cache (`_daily_digest`). Full performance stats live in the dashboard's 📊 Bot Performance panel instead. |
 | Orders cancelled manually on OKX | monitor | Trade marked closed, fresh signals will re-trade the coin |
+| ~~Learning pass~~ | `learn.py` | **Silenced since 2026-09-03** — `LEARN_TELEGRAM = 'off'`. The pass still runs on its 25-newly-graded-trades trigger and still writes cohorts, the distilled block and any proposals to `learned_rules` and the worker log; it just no longer pushes. Set to `'proposals'` to be pinged only when it wants a parameter change approved, or `'always'` for the original behaviour. |
 
 P&L math (`_exit_pnl()`): `net = (fill − entry) × size − entry×size×fee − fill×size×fee` with `fee = 0.001`. When OKX won't return an exact fill price even after the fallback lookups, the message shows an **estimate marked with `~`** (computed from the trigger price) rather than omitting the USDT figure.
 

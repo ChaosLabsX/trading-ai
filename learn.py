@@ -20,8 +20,9 @@ Division of labour, on purpose:
 Two outputs:
   * `learned_block` — statistics-only facts, stored and (once you opt in via
     LEARN_INJECT_INTO_PROMPT) injected into the live trade prompt.
-  * `proposals` — parameter changes, sent to Telegram for you to approve and
-    apply by hand. NEVER auto-applied. NEVER a coin blacklist.
+  * `proposals` — parameter changes for you to approve and apply by hand. NEVER
+    auto-applied. NEVER a coin blacklist. Whether these reach Telegram is governed
+    by LEARN_TELEGRAM below (default 'off' — stored and logged, not pushed).
 
 Runs at most once per worker run, and only after LEARN_TRIGGER_NEW_TRADES newly
 graded trades have accumulated since the last pass — so at real trade volume it
@@ -48,6 +49,24 @@ LEARN_MIN_COHORT = 25
 # Headroom for adaptive thinking + the structured result. This pass returns more
 # than the per-trade advisor (now 8000), so it gets more room again.
 LEARN_MAX_TOKENS = 12000
+
+# Where the learning pass sends its findings.
+#
+#   'off'       — never Telegram. Set on 2026-09-03 at the owner's request: the
+#                 routine report is noise when the honest answer is almost always
+#                 "no parameter changes". NOTHING is lost by this — the pass still
+#                 runs, still computes its cohorts, still writes the distilled block
+#                 and the full result to the `learned_rules` table, and still prints
+#                 to C:\OKXAI\logs\okx-signal-checker.log. It just stops pushing.
+#   'proposals' — Telegram ONLY when the pass actually wants something from you: a
+#                 proposed parameter change, or a failed analysis.
+#   'always'    — every pass reports, the original behaviour.
+#
+# Worth knowing before leaving this on 'off': surfacing a proposal is the whole
+# reason this pass exists, and proposals are NEVER auto-applied — so on 'off' a real
+# recommendation reaches nobody unless you go and read the log or the table.
+# 'proposals' gives you the silence without that blind spot.
+LEARN_TELEGRAM = 'off'
 
 # OFF by default. The pass writes its distilled block and Telegrams its proposals
 # from day one, but NOTHING is injected into a live trade decision until you flip
@@ -342,6 +361,10 @@ than proposing an exit change that cannot fix it."""
 def _report(result, n):
     from signal_checker import send_telegram
     proposals = result.get('proposals') or []
+    if LEARN_TELEGRAM == 'off' or (LEARN_TELEGRAM == 'proposals' and not proposals):
+        print(f'  [Learn] report suppressed (LEARN_TELEGRAM={LEARN_TELEGRAM!r}, '
+              f'{len(proposals)} proposal(s)) — stored in learned_rules')
+        return
     lines = [
         f'🧠 <b>Learning pass</b> — {n} graded trades analyzed',
         '',
@@ -414,12 +437,14 @@ def run_learning_pass():
     else:
         # The stats are stored, but analysis didn't return — say so rather than go
         # silent (this repo has a history of silent failures being the expensive kind).
-        try:
-            from signal_checker import send_telegram
-            send_telegram(f'🧠 Learning pass ran on {len(trades)} trades but the analysis '
-                          f'call returned nothing — cohorts stored, no proposals this run.')
-        except Exception:
-            pass
+        print(f'  [Learn] analysis returned nothing — cohorts stored, no proposals')
+        if LEARN_TELEGRAM != 'off':
+            try:
+                from signal_checker import send_telegram
+                send_telegram(f'🧠 Learning pass ran on {len(trades)} trades but the analysis '
+                              f'call returned nothing — cohorts stored, no proposals this run.')
+            except Exception:
+                pass
     print(f'  [Learn] pass complete — {len(trades)} trades, {len(cohorts)} cohorts, '
           f"{len(result['proposals']) if result else 0} proposal(s)")
 

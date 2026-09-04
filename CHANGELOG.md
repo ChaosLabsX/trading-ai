@@ -3,6 +3,40 @@
 Every meaningful change to the app, newest first. Kept so a future developer (human or AI)
 can trace what was done and why without digging through git history.
 
+## 2026-09-03 (later) — The learning pass stops Telegramming
+
+Owner's call: the routine report is noise. The honest answer from that pass is
+almost always "no parameter changes" — its first real run said exactly that, at
+length — and a message that never needs acting on trains you to ignore the channel
+that also carries stop-loss and trade alerts.
+
+- **`LEARN_TELEGRAM` added to `learn.py`, default `'off'`.** Three settings:
+  `'off'` (never push), `'proposals'` (push only when it wants a parameter change
+  approved, or when the analysis fails), `'always'` (the original behaviour).
+- **Nothing is lost at `'off'`.** The pass still fires on its 25-newly-graded-trades
+  trigger, still computes cohorts, still writes the distilled block and the full
+  result to `learned_rules`, and still prints to the worker log. It stops pushing,
+  not working.
+- **The trade-off is written down next to the constant**, because it is not
+  obvious: surfacing a proposal is the entire reason this pass exists, and proposals
+  are never auto-applied — so at `'off'` a genuine recommendation reaches nobody
+  unless someone reads the log or queries the table. `'proposals'` buys the silence
+  without that blind spot, and is one word away.
+- The failure notice ("analysis returned nothing") is gated too, but always prints
+  to the log — this repo's own comment on that branch notes silent failures are the
+  expensive kind, and that reasoning survives; only the transport changed.
+- Verified against the real `_report()` across all three modes × proposals/none:
+  `off` sends nothing either way, `proposals` sends only when there is one,
+  `always` sends both.
+
+**Context — the run that prompted this.** First real learning pass, triggered when
+the DOGE trade closed as the 25th graded trade (`tp_trail`, +$2.02, graded
+`well_timed`). It read 25 trades (15W/10L, PF 3.16) and correctly proposed nothing:
+of ten losses only one was a demonstrable shakeout, and 11 of 15 winners exited at
+or near the right moment, so neither stop nor trail width could be blamed. It also
+refused to reason from any cohort below `LEARN_MIN_COHORT = 25`. The guards worked;
+the message was simply not actionable.
+
 ## 2026-09-03 — Position sizes 15/22/30 → 45/50/55/60, and a volume gate to pay for it
 
 Owner's decision to put substantially more capital behind each trade. Applied in
