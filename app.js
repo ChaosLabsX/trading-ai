@@ -22,7 +22,10 @@ const state = {
   derivData: {},         // {symbol: {fundingRate, nextFundingRate, openInterest}}
   minSizes: {},          // {symbol: minSz} — OKX minimum order size, fetched on demand
   perfRows: null,        // closed-trade history — lazy-loaded on first panel open, then cached
-  perfRange: { days: 7 },
+  // Performance panel period. mode is 'month' | 'year' | 'last6' | 'all' | 'custom'.
+  // year/month are the anchor the arrows step; they stay meaningful when you switch
+  // modes so going Year → Month lands you in that year, not back at today.
+  perfRange: { mode: 'month', year: new Date().getFullYear(), month: new Date().getMonth() },
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1863,11 +1866,110 @@ async function loadPerfData(force = false) {
   }
 }
 
-function perfFilteredRows() {
+const PERF_MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                     'July', 'August', 'September', 'October', 'November', 'December'];
+
+// [from, to] in epoch ms for the current period. Month and year bounds are built
+// from local Date parts rather than by subtracting days, so "September" means the
+// calendar month however long it is and DST cannot shift an edge.
+function perfPeriodBounds() {
   const r = state.perfRange;
-  let from = 0, to = Infinity;
-  if (r.custom) { from = r.from; to = r.to; }
-  else if (r.days > 0) from = Date.now() - r.days * 86400000;
+  if (r.mode === 'custom') return [r.from, r.to];
+  if (r.mode === 'all')    return [0, Infinity];
+  if (r.mode === 'last6') {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 6);
+    return [d.getTime(), Infinity];
+  }
+  if (r.mode === 'year') {
+    return [new Date(r.year, 0, 1).getTime(),
+            new Date(r.year + 1, 0, 1).getTime() - 1];
+  }
+  return [new Date(r.year, r.month, 1).getTime(),
+          new Date(r.year, r.month + 1, 1).getTime() - 1];
+}
+
+function perfPeriodLabel() {
+  const r = state.perfRange;
+  switch (r.mode) {
+    case 'all':    return 'All time';
+    case 'last6':  return 'Last 6 months';
+    case 'custom': return 'Custom range';
+    case 'year':   return String(r.year);
+    default:       return `${PERF_MONTHS[r.month]} ${r.year}`;
+  }
+}
+
+// Oldest closed trade, as [year, month]. Used to stop the back arrow at the start
+// of the data instead of letting you page into empty months forever.
+function perfDataStart() {
+  const rows = state.perfRows;
+  if (!rows || !rows.length) return null;
+  let oldest = Infinity;
+  for (const t of rows) {
+    const ts = new Date(t.closed_at).getTime();
+    if (ts < oldest) oldest = ts;
+  }
+  if (!isFinite(oldest)) return null;
+  const d = new Date(oldest);
+  return [d.getFullYear(), d.getMonth()];
+}
+
+// step = -1 (older) or +1 (newer). Returns false when the move would leave the
+// data, which is what disables the arrow rather than silently doing nothing.
+function perfStep(step, apply = true) {
+  const r = state.perfRange;
+  if (r.mode !== 'month' && r.mode !== 'year') return false;
+  const start = perfDataStart();
+  const now = new Date();
+
+  let year = r.year, month = r.month;
+  if (r.mode === 'year') {
+    year += step;
+    if (year > now.getFullYear()) return false;
+    if (start && year < start[0]) return false;
+  } else {
+    month += step;
+    if (month < 0)  { month = 11; year -= 1; }
+    if (month > 11) { month = 0;  year += 1; }
+    if (year > now.getFullYear() ||
+        (year === now.getFullYear() && month > now.getMonth())) return false;
+    if (start && (year < start[0] || (year === start[0] && month < start[1]))) return false;
+  }
+  if (apply) { r.year = year; r.month = month; }
+  return true;
+}
+
+// Pull the anchor inside the data range. Without this, opening Month while the
+// newest trade is months old shows an empty panel and both arrows look broken.
+function perfSnapToData() {
+  const r = state.perfRange;
+  const rows = state.perfRows;
+  if (!rows || !rows.length) return;
+  let newest = -Infinity;
+  for (const t of rows) {
+    const ts = new Date(t.closed_at).getTime();
+    if (ts > newest) newest = ts;
+  }
+  if (!isFinite(newest)) return;
+  const [from, to] = perfPeriodBounds();
+  if (newest >= from && newest <= to) return;   // anchor already has data
+  const d = new Date(newest);
+  r.year = d.getFullYear();
+  r.month = d.getMonth();
+}
+
+function renderPerfControls() {
+  const label = el('perfPeriodLabel');
+  if (label) label.textContent = perfPeriodLabel();
+  const steppable = state.perfRange.mode === 'month' || state.perfRange.mode === 'year';
+  const prev = el('perfPrev'), next = el('perfNext');
+  if (prev) prev.disabled = !steppable || !perfStep(-1, false);
+  if (next) next.disabled = !steppable || !perfStep(+1, false);
+}
+
+function perfFilteredRows() {
+  const [from, to] = perfPeriodBounds();
   return (state.perfRows ?? []).filter(t => {
     const ts = new Date(t.closed_at).getTime();
     return ts >= from && ts <= to;
@@ -1893,11 +1995,12 @@ function equityCurveSvg(pnls) {
 
 function renderPerf() {
   if (!state.perfRows) return;
+  renderPerfControls();
   const rows = perfFilteredRows();
   const body = el('perfBody');
   if (!rows.length) {
-    body.innerHTML = `<div class="perf-empty">No closed trades in this period.<br>
-      <span>History starts with trades closed after the P&amp;L tracking update — new trades appear here automatically.</span></div>`;
+    body.innerHTML = `<div class="perf-empty">No closed trades in ${escHtml(perfPeriodLabel())}.<br>
+      <span>Use the arrows to step to another period, or “All” for the whole history.</span></div>`;
     return;
   }
   const pnls      = rows.map(t => +t.net_pnl_usdt || 0);
@@ -1970,7 +2073,7 @@ function togglePerfPanel() {
     requestAnimationFrame(() => sec.classList.add('open'));
     el('perfBtn').classList.add('active');
     if (!state.perfRows) {
-      loadPerfData().then(ok => { if (ok) renderPerf(); });
+      loadPerfData().then(ok => { if (ok) { perfSnapToData(); renderPerf(); } });
     }
     setTimeout(() => sec.scrollIntoView({ behavior: 'smooth', block: 'start' }), 80);
   } else {
@@ -2121,15 +2224,39 @@ function wireEvents() {
   el('perfBtn').addEventListener('click', togglePerfPanel);
   el('perfRefreshBtn').addEventListener('click', () => {
     el('perfBody').innerHTML = '<div class="loading-row"><span class="spinner"></span> Reloading trade history…</div>';
-    loadPerfData(true).then(ok => { if (ok) renderPerf(); });
+    loadPerfData(true).then(ok => { if (ok) { perfSnapToData(); renderPerf(); } });
   });
   document.querySelectorAll('.perf-range').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.perf-range').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      state.perfRange = { days: +btn.dataset.days };
+      const mode = btn.dataset.mode;
+      // Carry the anchor across mode switches, but land somewhere with data:
+      // jumping to Month from All would otherwise open on a month you never traded.
+      const r = state.perfRange;
+      const now = new Date();
+      const year  = r.year  ?? now.getFullYear();
+      const month = r.month ?? now.getMonth();
+      state.perfRange = { mode, year, month };
+      if (mode === 'month' || mode === 'year') perfSnapToData();
       renderPerf();
     });
+  });
+  el('perfPrev').addEventListener('click', () => { if (perfStep(-1)) renderPerf(); });
+  el('perfNext').addEventListener('click', () => { if (perfStep(+1)) renderPerf(); });
+
+  // Left/right arrow keys step the period while the panel is open. Guarded so it
+  // never steals a keystroke from a text field, a date picker, or an open modal.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const sec = el('perfSection');
+    if (!sec || sec.style.display === 'none') return;
+    if (document.querySelector('.modal-overlay.open')) return;
+    const t = e.target;
+    if (t && (t.isContentEditable ||
+              ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(t.tagName))) return;
+    if (perfStep(e.key === 'ArrowLeft' ? -1 : +1)) { e.preventDefault(); renderPerf(); }
   });
   el('perfApplyBtn').addEventListener('click', () => {
     const f = el('perfFrom').value, t = el('perfTo').value;
@@ -2138,7 +2265,7 @@ function wireEvents() {
     const to   = new Date(`${t}T23:59:59`).getTime();
     if (from > to) { toast('"From" must be before "To"', 'error'); return; }
     document.querySelectorAll('.perf-range').forEach(b => b.classList.remove('active'));
-    state.perfRange = { custom: true, from, to };
+    state.perfRange = { mode: 'custom', from, to };
     renderPerf();
   });
 

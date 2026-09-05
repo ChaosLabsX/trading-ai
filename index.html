@@ -103,10 +103,22 @@
       </div>
 
       <div class="perf-ranges">
-        <button class="perf-range active" data-days="7">7D</button>
-        <button class="perf-range" data-days="30">30D</button>
-        <button class="perf-range" data-days="90">90D</button>
-        <button class="perf-range" data-days="0">All</button>
+        <!-- Period stepper. The arrows walk one month (or one year) at a time and
+             disable themselves at the edges of the data, so you cannot page off
+             into empty periods in either direction. -->
+        <div class="perf-stepper">
+          <button class="perf-nav" id="perfPrev" type="button" title="Previous period (←)"
+                  aria-label="Previous period">‹</button>
+          <span class="perf-period" id="perfPeriodLabel" aria-live="polite">—</span>
+          <button class="perf-nav" id="perfNext" type="button" title="Next period (→)"
+                  aria-label="Next period">›</button>
+        </div>
+        <div class="perf-modes">
+          <button class="perf-range active" data-mode="month">Month</button>
+          <button class="perf-range" data-mode="year">Year</button>
+          <button class="perf-range" data-mode="last6">Last 6 months</button>
+          <button class="perf-range" data-mode="all">All</button>
+        </div>
         <span class="perf-custom">
           <input type="date" id="perfFrom" class="perf-date" />
           <span class="perf-arrow">→</span>

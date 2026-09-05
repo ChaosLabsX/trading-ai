@@ -1331,6 +1331,38 @@ tr.sig-ssell:hover { background: rgba(239,68,68,.08) !important; }
 }
 .perf-range:hover { border-color: var(--border-focus); color: var(--text); }
 .perf-range.active { background: var(--blue-dim); border-color: var(--accent); color: var(--text); }
+
+/* Period stepper: ‹ September 2026 ›  — one visual unit, so the arrows read as
+   belonging to the label rather than as two more buttons in the mode row. */
+.perf-stepper {
+  display: flex; align-items: stretch; gap: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg-input); overflow: hidden;
+}
+.perf-nav {
+  background: none; border: 0; color: var(--text-dim); cursor: pointer;
+  font-family: var(--font); font-size: 17px; line-height: 1;
+  padding: 4px 11px; transition: background .12s ease, color .12s ease;
+}
+.perf-nav:hover:not(:disabled) { background: var(--blue-dim); color: var(--text); }
+.perf-nav:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* Disabled = you are at the edge of the data. Kept visible rather than hidden so
+   the control does not change width as you step. */
+.perf-nav:disabled { opacity: .3; cursor: default; }
+.perf-period {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 132px; padding: 5px 4px;
+  font-size: 12px; font-weight: 600; color: var(--text);
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--border); border-right: 1px solid var(--border);
+}
+.perf-modes { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+@media (max-width: 560px) {
+  .perf-custom { margin-left: 0; }
+  .perf-stepper { width: 100%; }
+  .perf-period { flex: 1; }
+}
 .perf-custom { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
 .perf-arrow { color: var(--text-muted); font-size: 12px; }
 .perf-date {

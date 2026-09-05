@@ -3,6 +3,35 @@
 Every meaningful change to the app, newest first. Kept so a future developer (human or AI)
 can trace what was done and why without digging through git history.
 
+## 2026-09-03 (later still) — Performance panel navigates by calendar period
+
+The 7D / 30D / 90D buttons were unused; the owner reads results per month, per
+year, or across the whole book. Rolling day-windows cannot express that — "last
+30 days" is never the same thing as "August".
+
+- **Stepper + modes.** `‹ September 2026 ›` with **Month / Year / Last 6 months /
+  All** beside it, plus the existing custom from→to pickers. Arrows step by click
+  or with the **← / →** keys while the panel is open.
+- **The arrows know where the data ends.** They disable at the newest traded period
+  and at the oldest, so you cannot page off into an infinite run of empty months.
+  Opening the panel calls `perfSnapToData()`, which pulls the anchor to the newest
+  traded month — otherwise a quiet fortnight would open the panel blank on the
+  current month with both arrows looking broken.
+- **Calendar bounds, not day arithmetic.** Ranges come from `new Date(y, m, 1)` to
+  `new Date(y, m+1, 1) - 1`, so a month is that month however long it is and a DST
+  shift cannot move an edge. Verified by partition: the per-month totals sum to
+  exactly the All-time total, no gaps and no double-counting at the boundaries.
+- **Keyboard handler is guarded** — it ignores the keys when a modal is open, when
+  focus is in an input/select/textarea/button, or with a modifier held, so it never
+  steals a keystroke from the date pickers sitting next to it.
+- **Fixed, found by this work: `parity_check.py` was silently broken.** Its JS
+  driver split `app.js` on a bare newline and matched `line === '}'`. Editing these
+  files from Python on Windows rewrites them CRLF, which leaves a carriage return
+  on the end of every line, so that scan never matched and the check bailed out
+  with *could not find the end of generateSignal*. It now splits on `/\r?\n/`.
+  A parity test that cannot run is worse than none: it fails in a way that looks
+  like output rather than like a failure.
+
 ## 2026-09-03 (later) — The learning pass stops Telegramming
 
 Owner's call: the routine report is noise. The honest answer from that pass is

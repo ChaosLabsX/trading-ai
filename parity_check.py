@@ -68,7 +68,12 @@ const fs = require('fs'), vm = require('vm'), path = require('path');
 const [here, gridPath, outPath] = process.argv.slice(2);
 
 const cfg = fs.readFileSync(path.join(here, 'config.js'), 'utf8');
-const lines = fs.readFileSync(path.join(here, 'app.js'), 'utf8').split('\n');
+// Split on /\r?\n/, not '\n'. On Windows these files are routinely CRLF in the
+// working tree (git normalises to LF only on commit), and a bare '\n' split
+// leaves a trailing '\r' on every line — which silently breaks the `line === '}'`
+// scan below and makes this check fail closed with 'could not find the end of
+// generateSignal'. A parity test that cannot run is worse than no parity test.
+const lines = fs.readFileSync(path.join(here, 'app.js'), 'utf8').split(/\r?\n/);
 
 const start = lines.findIndex(l => l.startsWith('function generateSignal('));
 if (start < 0) { console.error('generateSignal not found in app.js'); process.exit(2); }
